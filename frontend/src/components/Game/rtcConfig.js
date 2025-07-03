@@ -1,10 +1,8 @@
 const rtcConfig = {
   iceServers: [
-    { urls: ["stun:bn-turn1.xirsys.com"] },
     {
-      username:
-        "lk11OZP5aa3h51oLgGVIOg8q9D623_Rsp8vWjV3GxdjxsprkjyNOlvuJQQRuHx1QAAAAAGhmmBRUdXJuQW51ag==",
-      credential: "b0377942-581c-11f0-8bcc-0242ac140004",
+      username: "...",
+      credential: "...",
       urls: [
         "turn:bn-turn1.xirsys.com:80?transport=udp",
         "turn:bn-turn1.xirsys.com:3478?transport=udp",
