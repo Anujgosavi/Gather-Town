@@ -2,19 +2,12 @@ import { useRef, useState, useEffect, useCallback } from "react";
 import collisions from "../../utils/collisions";
 import InteractionMenu from "./InteractionMenu";
 import Sprite from "./Sprite";
+import rtcConfig from "./rtcConfig";
 
 const BOUNDARY_SIZE = 32;
 const INTERACTION_RANGE = 50;
 const MAP_WIDTH = 1524;
 const MAP_HEIGHT = 776;
-
-// Add WebRTC configuration
-const rtcConfig = {
-  iceServers: [
-    { urls: "stun:stun.l.google.com:19302" },
-    { urls: "stun:stun1.l.google.com:19302" },
-  ],
-};
 
 const useGame = (canvasRef, socketRef, keysRef) => {
   const [player, setPlayer] = useState(null);
