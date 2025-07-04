@@ -2,7 +2,7 @@ import { useRef, useState, useEffect, useCallback } from "react";
 import collisions from "../../utils/collisions";
 import InteractionMenu from "./InteractionMenu";
 import Sprite from "./Sprite";
-import rtcConfig from "./rtcConfig";
+import axios from "axios";
 
 const BOUNDARY_SIZE = 32;
 const INTERACTION_RANGE = 50;
@@ -29,6 +29,7 @@ const useGame = (canvasRef, socketRef, keysRef) => {
     remoteStreams: {}, // Changed to handle multiple streams
   });
   const meetingPeerConnections = useRef({}); // Store peer connections for meeting room
+  const [iceConfig, setIceConfig] = useState(null); // <-- Add ICE config state
 
   // Load images
   useEffect(() => {
@@ -96,6 +97,22 @@ const useGame = (canvasRef, socketRef, keysRef) => {
     console.log("Boundaries generated:", generated);
   }, []);
 
+  // Fetch ICE servers from backend on mount
+  useEffect(() => {
+    const fetchIceServers = async () => {
+      try {
+        const res = await axios.get("/api/ice-token");
+        setIceConfig(res.data); // expects { iceServers: [...] }
+      } catch (err) {
+        console.error("Failed to fetch ICE servers:", err);
+        setIceConfig({
+          iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+        });
+      }
+    };
+    fetchIceServers();
+  }, []);
+
   // Define all socket handlers with useCallback
   const handleCurrentPlayers = useCallback(
     (players) => {
@@ -141,6 +158,34 @@ const useGame = (canvasRef, socketRef, keysRef) => {
     },
     [playerImages]
   );
+
+  // const handlePlayerMoved = useCallback(
+  //   (playerInfo) => {
+  //     //console.log('Player moved:', playerInfo);
+  //     setOtherPlayers((prev) => {
+  //       const existing = prev[playerInfo.id];
+  //       if (existing) {
+  //         const updatedPlayer = new Sprite({
+  //           position: playerInfo.position,
+  //           image: playerImages?.[playerInfo.direction] || playerImages?.down,
+  //           frames: { max: 4 },
+  //           sprites: playerImages,
+  //           name: existing.name,
+  //           id: existing.id,
+  //           speed: existing.speed,
+  //           lastDirection: playerInfo.direction,
+  //           moving: playerInfo.moving,
+  //         });
+  //         return {
+  //           ...prev,
+  //           [playerInfo.id]: updatedPlayer,
+  //         };
+  //       }
+  //       return prev;
+  //     });
+  //   },
+  //   [playerImages]
+  // );
 
   const handlePlayerMoved = useCallback(
     (playerInfo) => {
@@ -299,6 +344,7 @@ const useGame = (canvasRef, socketRef, keysRef) => {
 
   // Handle meeting room WebRTC
   const initializeMeetingRoomCall = useCallback(async () => {
+    if (!iceConfig) return; // Wait for ICE config
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: true,
@@ -312,11 +358,38 @@ const useGame = (canvasRef, socketRef, keysRef) => {
 
       // Function to create peer connection for a participant
       const createPeerConnection = async (participantId) => {
-        // Prevent duplicate peer connections
         if (meetingPeerConnections.current[participantId]) {
           return meetingPeerConnections.current[participantId];
         }
-        const pc = new RTCPeerConnection(rtcConfig);
+        // --- Ensure RTCConfiguration is always valid and log it ---
+        let rtcConfig = iceConfig;
+        if (
+          !rtcConfig ||
+          typeof rtcConfig !== "object" ||
+          !Array.isArray(rtcConfig.iceServers)
+        ) {
+          rtcConfig = {
+            iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+          };
+        }
+        console.log(
+          "MeetingRoom: Using RTCConfiguration for",
+          participantId,
+          rtcConfig
+        );
+
+        let pc;
+        try {
+          pc = new RTCPeerConnection(rtcConfig);
+        } catch (err) {
+          console.error(
+            "MeetingRoom: Failed to create RTCPeerConnection for",
+            participantId,
+            err,
+            rtcConfig
+          );
+          throw err;
+        }
         meetingPeerConnections.current[participantId] = pc;
 
         stream.getTracks().forEach((track) => pc.addTrack(track, stream));
@@ -331,16 +404,29 @@ const useGame = (canvasRef, socketRef, keysRef) => {
         };
 
         pc.ontrack = (event) => {
-          setMeetingRoomCall((prev) => {
-            // Always update the stream for this participant
-            return {
-              ...prev,
-              remoteStreams: {
-                ...prev.remoteStreams,
-                [participantId]: event.streams[0],
-              },
-            };
-          });
+          // Only set remote stream if it's not our own stream
+          if (
+            event.streams &&
+            event.streams[0] &&
+            event.streams[0].id !== stream.id
+          ) {
+            setMeetingRoomCall((prev) => {
+              return {
+                ...prev,
+                remoteStreams: {
+                  ...prev.remoteStreams,
+                  [participantId]: event.streams[0],
+                },
+              };
+            });
+          }
+        };
+
+        pc.onconnectionstatechange = () => {
+          console.log(
+            `MeetingRoom: Peer ${participantId} connection state:`,
+            pc.connectionState
+          );
         };
 
         return pc;
@@ -457,7 +543,7 @@ const useGame = (canvasRef, socketRef, keysRef) => {
     } catch (error) {
       console.error("Error initializing meeting room call:", error);
     }
-  }, [rtcConfig]);
+  }, [iceConfig]);
 
   // Clean up meeting room call
   const cleanupMeetingRoom = useCallback(() => {
